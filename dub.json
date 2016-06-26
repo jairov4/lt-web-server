@@ -1,7 +1,7 @@
 {
 	"name" : "lt-web-server",
 	"copyright": "© 2016 Jairo Andres Velasco",
-	"description" : "Integration of demonize with vibe.d",
+	"description" : "Super lightweight static web server using vibe.d",
 	"license": "MIT",
 	"authors": ["Jairo Andres Velasco (jairov4)"],
 	"versions": ["VibeCustomMain", "VibeNoSSL", "VibeManualMemoryManagement"],
