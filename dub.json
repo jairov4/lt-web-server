@@ -1,0 +1,15 @@
+{
+	"name" : "lt-web-server",
+	"copyright": "© 2016 Jairo Andres Velasco",
+	"description" : "Integration of demonize with vibe.d",
+	"license": "MIT",
+	"authors": ["Jairo Andres Velasco (jairov4)"],
+	"versions": ["VibeCustomMain", "VibeNoSSL", "VibeManualMemoryManagement"],
+	"dependencies" : {
+		"daemonize": "~>0.1.0",
+		"vibe-d": "~>0.7.30-alpha.3"
+	},
+	"subConfigurations": {
+		"daemonize": "colorized",
+	}
+}
