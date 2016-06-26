@@ -10,52 +10,63 @@ import vibe.http.server;
 import vibe.http.router;
 import vibe.http.fileserver;
 
+import jsonizer;
 import std.json;
 import std.file;
 import std.path;
+import std.getopt;
 
-void loadRouteSpecs(string settings, URLRouter router, shared ILogger logger) {
-    auto json = parseJSON(settings);
-    if (json.type != JSON_TYPE.OBJECT) throw new Error("Settings file must contain an object");
-    auto routes = json["routes"].array;
+immutable string settingsFileName = "web.json";
+
+void loadRouteSpecs(RouteSettings[] routes, string basePath, URLRouter router, shared ILogger logger) 
+{
     foreach(route; routes)
     {
-        if (route.type != JSON_TYPE.OBJECT) throw new Error("Settings file: each route must be an object");
-        auto path = route["path"].str;
-        auto type = route["type"].str;
-        auto arg = route["arg"].str;
-
-        if(type == "path") 
-		{
-            auto targetPath = thisExePath.dirName.buildPath(arg);
-			router.get(path, serveStaticFiles(targetPath)); 
-			logger.logInfo("Mapping path: " ~ path ~ " with " ~ targetPath);
-		}
-        else if(type == "file") 
-		{
-            auto targetPath = thisExePath.dirName.buildPath(arg);
-			router.get(path, serveStaticFile(targetPath));
-			logger.logInfo("Mapping path: " ~ path ~ " with " ~ targetPath);
-		}
-        else throw new Error("Invalid type: " ~ type);
+        auto targetPath = route.arg.absolutePath(basePath);
+        if(route.type == "path")
+        {
+            router.get(route.path, serveStaticFiles(targetPath)); 
+        }
+        else if(route.type == "file")
+        {
+            router.get(route.path, serveStaticFile(targetPath));
+        }
+        else throw new Error("Invalid type: " ~ route.type);
+        logger.logInfo("Mapping path: " ~ route.path ~ " with " ~ targetPath);
     }
 }
 
-void setupServer(shared ILogger logger, bool function() shouldExit)
+int runServer(string settingsFileName)
 {
+    settingsFileName = settingsFileName.absolutePath(thisExePath.dirName);
+    auto basePath = settingsFileName.dirName;
+
+    // Load settings from file
+    auto settingsFileContents = readText(settingsFileName);
+    auto json = parseJSON(settingsFileContents);
+    auto settings = json.fromJSON!Settings;
+
+    settings.logFileName = settings.logFileName.absolutePath(basePath);
+    settings.vibeLogFileName = settings.vibeLogFileName.absolutePath(basePath);
+
+    // Setup loggers
+    setLogFile(settings.vibeLogFileName, settings.vibeLogLevel);
+    auto logger = new shared StrictLogger(settings.logFileName);
+    logger.minOutputLevel = settings.logLevel;
+
     // Default vibe initialization
-    auto settings = new HTTPServerSettings;
-    settings.port = 8080;
-    settings.useCompressionIfPossible = true;
-    settings.bindAddresses = ["::1", "127.0.0.1"];
+    auto svrSettings = new HTTPServerSettings;
+    svrSettings.port = cast(ushort)settings.port;
+    svrSettings.useCompressionIfPossible = settings.useCompressionIfPossible;
+    svrSettings.bindAddresses = settings.bindAddresses;
 
     auto router = new URLRouter;
-    auto settingsFileName = thisExePath.dirName.buildPath("web.json");
-    logger.logInfo("Loading settings file: " ~ settingsFileName);
-    auto settingsFileContents = readText(settingsFileName);
-    loadRouteSpecs(settingsFileContents, router, logger);
+    logger.logInfo("Loading routes from settings");
+    loadRouteSpecs(settings.routes, basePath, router, logger);
 
-    listenHTTP(settings, router);
+    listenHTTP(svrSettings, router);
+
+    return runEventLoop();
 }
 
 // Simple daemon description
@@ -65,9 +76,6 @@ alias daemon = Daemon!(
         Composition!(Signal.Terminate, Signal.Quit, Signal.Shutdown, Signal.Stop), (logger)
         {
             logger.logInfo("Exiting...");
-            
-            // No need to force exit here
-            // main will stop after the call 
             exitEventLoop(true);
             return false; 
         },
@@ -77,41 +85,54 @@ alias daemon = Daemon!(
             return true;
         }
     ),
-    
-    (logger, shouldExit) {
-        setupServer(logger, shouldExit);
-
-        // All exceptions are caught by daemonize
-        return runEventLoop();
-    }
+    (logger, shouldExit) { return runServer(settingsFileName.dup); }
 );
+
+struct RouteSettings 
+{
+    mixin JsonizeMe;
+
+    @jsonize string type;
+    @jsonize string path;
+    @jsonize string arg;
+}
+
+struct Settings 
+{
+    mixin JsonizeMe;
+
+    @jsonize(JsonizeOptional.yes) int port = 3000;
+    @jsonize(JsonizeOptional.yes) string[] bindAddresses = ["::1", "127.0.0.1"];
+    @jsonize(JsonizeOptional.yes) bool useCompressionIfPossible = true;
+    @jsonize(JsonizeOptional.yes) string logFileName = "general.log";
+    @jsonize(JsonizeOptional.yes) string vibeLogFileName = "vibe.log";
+    @jsonize(JsonizeOptional.yes) LoggingLevel logLevel = LoggingLevel.Debug;
+    @jsonize(JsonizeOptional.yes) VibeLogLevel vibeLogLevel = VibeLogLevel.info;
+    @jsonize RouteSettings[] routes;
+}
 
 int main(string[] args)
 {
-    bool noService = args.length > 1 && args[1] == "--no-svc";
+    bool noExecAsService = false;
+    string settingsFileNameOpt = settingsFileName;
+    auto helpInformation = getopt(args, 
+        "no-service", "No use as system service", &noExecAsService,
+        "settings", "JSON settings file name.", &settingsFileNameOpt);
 
-    // Setting vibe logger 
-    // daemon closes stdout/stderr and vibe logger will crash
-    // if not suppress printing to console
-    version(Windows) auto vibeLogName = (noService ? "" : "C:\\" ) ~ "server-access.log";
-    else enum vibeLogName = "server-access.log";
-
-    // no stdout/stderr output
-    version(Windows) {}
-    else setLogLevel(VibeLogLevel.none);
-
-    setLogFile(vibeLogName, VibeLogLevel.info);
-
-    version(Windows) auto logFileName = (noService ? "" : "C:\\" ) ~ "logfile.log";
-    else enum logFileName = "logfile.log";
-
-    auto logger = new shared StrictLogger(logFileName);
-    logger.minOutputLevel = LoggingLevel.Debug;
-
-    if (noService) {
-        setupServer(logger, null);
-        return runEventLoop();
+    if (helpInformation.helpWanted)
+    {
+        defaultGetoptPrinter(
+            "Help about this program. "
+            "Settings file path is relative to this executable",
+            helpInformation.options);
+        return 0;
     }
 
-    return buildDaemon!daemon.run(logger); 
+    if(!noExecAsService)
+    {
+        auto logger = new shared StrictLogger(thisExePath.dirName.buildPath("lt-web-server-service.log"));
+        return buildDaemon!daemon.run(logger);
+    }
+
+    return runServer(settingsFileNameOpt);
 }
