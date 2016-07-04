@@ -14,3 +14,7 @@ This web server can be configured using a simple settings file called `web.json`
 
 The type path allows to serve a path with wildcards using a base folder.
 The type file allows to serve a path using a static file.
+
+To run the server without to install as service use:
+
+    dub run lt-web-server --no-service --settings=/absolute/path/web.json
