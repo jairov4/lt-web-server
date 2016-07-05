@@ -55,21 +55,15 @@ class FileServerCache
 		if(addSize > remainingSize) return;
 
 		// TODO: Replacement policy
-		synchronized(this)
-		{
-			remainingSize -= addSize;
-			entries[info.pathstr] = info;
-		}
+		remainingSize -= addSize;
+		entries[info.pathstr] = info;
 	}
 
 	CacheEntry get(string pathstr)
 	{
-		synchronized(this)
+		if(auto pv = pathstr in entries)
 		{
-			if(auto pv = pathstr in entries)
-			{
-				return *pv;
-			}
+			return *pv;
 		}
 
 		return null;
@@ -120,7 +114,7 @@ class HTTPFileServerSettings {
 	this()
 	{
 		// need to use the contructor because the Ubuntu 13.10 GDC cannot CTFE dur()
-		maxAge = 2.seconds;
+		maxAge = 0.seconds;
 	}
 
 	this(string path_prefix)
@@ -214,8 +208,10 @@ private void sendFileCacheImpl(scope HTTPServerRequest req, scope HTTPServerResp
 		info = prepareRequestResponseInfo(pathstr, settings);
 	} else {
 		info = settings.cache.get(pathstr);
-		if(info is null) info = prepareRequestResponseInfo(pathstr, settings);
-		else settings.cache.tryPut(info);
+		if(info is null) { 
+			info = prepareRequestResponseInfo(pathstr, settings);
+			settings.cache.tryPut(info);
+		}
 	}
 
 	if(info.notFound) 
@@ -233,7 +229,7 @@ private void sendFileCacheImpl(scope HTTPServerRequest req, scope HTTPServerResp
 	if (settings.maxAge > seconds(0)) {
 		auto expireTime = Clock.currTime(UTC()) + settings.maxAge;
 		res.headers["Expires"] = toRFC822DateTimeString(expireTime);
-		res.headers["Cache-Control"] = "max-age="~to!string(settings.maxAge.total!"seconds");
+		res.headers["Cache-Control"] = "max-age=" ~ to!string(settings.maxAge.total!"seconds");
 	}
 
 	if( auto pv = "If-Modified-Since" in req.headers ) {
@@ -315,6 +311,7 @@ private void sendFileCacheImpl(scope HTTPServerRequest req, scope HTTPServerResp
 			else
 			{
 				auto stream = new MemoryStream(info.content[begin..end+1]);
+				scope(exit) delete stream;
 				res.writeRawBody(stream);
 			}
 
@@ -326,6 +323,7 @@ private void sendFileCacheImpl(scope HTTPServerRequest req, scope HTTPServerResp
 	// avoid double-compression
 	if ("Content-Encoding" in res.headers && isCompressedFormat(info.contentType))
 		res.headers.remove("Content-Encoding");
+
 	res.headers["Content-Length"] = info.contentLength;
 
 	if(settings.preWriteCallback)

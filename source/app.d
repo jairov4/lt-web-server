@@ -56,7 +56,7 @@ int runServer(string settingsFileName)
     svrSettings.port = cast(ushort)settings.port;
     svrSettings.useCompressionIfPossible = settings.useCompressionIfPossible;
     svrSettings.bindAddresses = settings.bindAddresses;
-    svrSettings.options |= HTTPServerOption.distribute;
+    //svrSettings.options |= HTTPServerOption.distribute;
 
     auto router = new URLRouter;
     logInfo("Loading routes from settings");
