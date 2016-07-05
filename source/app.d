@@ -5,7 +5,6 @@ import vibe.core.core;
 import vibe.core.log;
 import vibe.http.server;
 import vibe.http.router;
-import vibe.http.fileserver : HTTPFileServerSettings;
 
 import jsonizer;
 import std.json;
@@ -19,16 +18,18 @@ immutable string settingsFileName = "web.json";
 
 void loadRouteSpecs(RouteSettings[] routes, string basePath, URLRouter router)
 {
+    auto settings = new HTTPFileServerSettings;
+    settings.cache = new FileServerCache;
     foreach(route; routes)
     {
         auto targetPath = route.arg.absolutePath(basePath);
         if(route.type == "path")
         {
-            router.get(route.path, serveStaticFiles(targetPath)); 
+            router.get(route.path, serveStaticFiles(targetPath, settings)); 
         }
         else if(route.type == "file")
         {
-            router.get(route.path, serveStaticFile(targetPath));
+            router.get(route.path, serveStaticFile(targetPath, settings));
         }
         else throw new Error("Invalid type: " ~ route.type);
         logInfo("Mapping path: " ~ route.path ~ " with " ~ targetPath);
@@ -55,6 +56,7 @@ int runServer(string settingsFileName)
     svrSettings.port = cast(ushort)settings.port;
     svrSettings.useCompressionIfPossible = settings.useCompressionIfPossible;
     svrSettings.bindAddresses = settings.bindAddresses;
+    svrSettings.options |= HTTPServerOption.distribute;
 
     auto router = new URLRouter;
     logInfo("Loading routes from settings");
@@ -82,13 +84,12 @@ struct Settings
     @jsonize(JsonizeOptional.yes) string[] bindAddresses = ["::", "0.0.0.0"];
     @jsonize(JsonizeOptional.yes) bool useCompressionIfPossible = true;
     @jsonize(JsonizeOptional.yes) string logFileName = "vibe.log";
-    @jsonize(JsonizeOptional.yes) LogLevel logLevel = LogLevel.info;
+    @jsonize(JsonizeOptional.yes) LogLevel logLevel = LogLevel.none;
     @jsonize RouteSettings[] routes;
 }
 
 int main(string[] args)
 {
-    bool noExecAsService = false;
     string settingsFileNameOpt = settingsFileName;
     auto helpInformation = getopt(args, 
         "settings", "JSON settings file name.", &settingsFileNameOpt);
@@ -101,6 +102,8 @@ int main(string[] args)
             helpInformation.options);
         return 0;
     }
+
+    logInfo("Loading info from " ~ settingsFileNameOpt);
 
     return runServer(settingsFileNameOpt);
 }
