@@ -7,19 +7,19 @@ import vibe.http.server;
 import vibe.http.router;
 
 import jsonizer;
+
 import std.json;
 import std.file;
 import std.path;
 import std.getopt;
+import std.datetime;
 
 import fileCache;
 
 immutable string settingsFileName = "web.json";
 
-void loadRouteSpecs(RouteSettings[] routes, string basePath, URLRouter router)
+void loadRouteSpecs(HTTPFileServerSettings settings, RouteSettings[] routes, string basePath, URLRouter router)
 {
-    auto settings = new HTTPFileServerSettings;
-    settings.cache = new FileServerCache;
     foreach(route; routes)
     {
         auto targetPath = route.arg.absolutePath(basePath);
@@ -50,7 +50,7 @@ int runServer(string settingsFileName)
 
     // Setup loggers
     setLogFile(settings.logFileName, settings.logLevel);
-    
+
     // Default vibe initialization
     auto svrSettings = new HTTPServerSettings;
     svrSettings.port = cast(ushort)settings.port;
@@ -58,9 +58,14 @@ int runServer(string settingsFileName)
     svrSettings.bindAddresses = settings.bindAddresses;
     //svrSettings.options |= HTTPServerOption.distribute;
 
+    auto fileServerSettings = new HTTPFileServerSettings;
+    fileServerSettings.cache = settings.useServerCache ? new FileServerCache : null;
+    logInfo("Using cache: " ~ (settings.useServerCache ? "true" : "false"));
+    fileServerSettings.maxAge = settings.clientCacheMaxAge.seconds;
+
     auto router = new URLRouter;
     logInfo("Loading routes from settings");
-    loadRouteSpecs(settings.routes, basePath, router);
+    loadRouteSpecs(fileServerSettings, settings.routes, basePath, router);
 
     listenHTTP(svrSettings, router);
 
@@ -85,6 +90,8 @@ struct Settings
     @jsonize(JsonizeOptional.yes) bool useCompressionIfPossible = true;
     @jsonize(JsonizeOptional.yes) string logFileName = "vibe.log";
     @jsonize(JsonizeOptional.yes) LogLevel logLevel = LogLevel.none;
+    @jsonize(JsonizeOptional.yes) bool useServerCache = false;
+	@jsonize(JsonizeOptional.yes) uint clientCacheMaxAge = 0;
     @jsonize RouteSettings[] routes;
 }
 

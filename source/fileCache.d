@@ -178,26 +178,6 @@ private CacheEntry prepareRequestResponseInfo(string pathstr, HTTPFileServerSett
 	return info;
 }
 
-private void writeBody(CacheEntry info, ulong begin, HTTPServerResponse res)
-{
-	if(info.contentsTooLarge)
-	{
-		auto fil = openFile(info.pathstr);
-		scope(exit) fil.close();
-		res.writeBody(fil);
-	}
-	else if(begin == 0)
-	{
-		res.writeBody(info.content);
-	}
-	else
-	{
-		auto stream = new MemoryStream(info.content);
-		stream.seek(begin);
-		res.writeRawBody(stream);
-	}
-}
-
 private void sendFileCacheImpl(scope HTTPServerRequest req, scope HTTPServerResponse res, Path path, HTTPFileServerSettings settings)
 {
 	CacheEntry info;
